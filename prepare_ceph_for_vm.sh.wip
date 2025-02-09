@@ -1,0 +1,126 @@
+#!/bin/bash
+#
+# Interactive script to configure a host-wide CephFS mount and update selected
+# LXC containers in Proxmox to bind-mount that CephFS share.
+# This script requires you've already configured your CephFS
+# But from that it will connect a CephFS to each of the LXC containers you choose
+#
+#
+# Enhancements in this version:
+#   - Validates that an active CephFS Metadata Server (MDS) is available.
+#   - Uses the keyring from /etc/pve/priv/ceph.client.admin.keyring.
+#   - Extracts the secret using an awk-based command.
+#   - Optionally echoes each command before executing it (via -v for verbose mode).
+#   - Uses whiptail for container selection.
+#   - Uses colored output: blue for informational messages and yellow for xtrace (when verbose).
+#   - The container mount point default is now "/cephs".
+#
+# IMPORTANT: Run this script as root on each Proxmox node.
+#
+
+set -e
+
+##########################
+# Process command-line arguments for verbose mode (-v)
+##########################
+VERBOSE=0
+if [ "$1" == "-v" ]; then
+    VERBOSE=1
+    shift
+fi
+
+##########################
+# Color Definitions
+##########################
+BLUE="\033[0;34m"
+YELLOW="\033[0;33m"
+RESET="\033[0m"
+
+# If verbose mode is enabled, set PS4 to print in yellow and enable xtrace.
+if [ "$VERBOSE" -eq 1 ]; then
+    export PS4="${YELLOW}+ ${RESET}"
+    set -x
+fi
+
+##########################
+# Utility Functions
+##########################
+# Prompt with a default value.
+prompt_default() {
+    local prompt_msg="$1"
+    local default_val="$2"
+    read -p "$prompt_msg [$default_val]: " user_input
+    if [ -z "$user_input" ]; then
+        echo "$default_val"
+    else
+        echo "$user_input"
+    fi
+}
+
+# Pause with a message.
+pause() {
+    read -p "$1"
+}
+
+# Info function for printing messages in blue.
+info() {
+    echo -e "${BLUE}$*${RESET}"
+}
+
+##########################
+# Step 0: Check for Root
+##########################
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${BLUE}Error: This script must be run as root.${RESET}" >&2
+    exit 1
+fi
+
+##########################
+# Step 1: Retrieve Ceph Monitors
+##########################
+info "==> Attempting to retrieve Ceph monitor addresses from /etc/pve/ceph.conf..."
+MONITORS=""
+if [ -f /etc/pve/ceph.conf ]; then
+    # Look for a non-commented mon_host line.
+    MON_LINE=$(grep -E "^\s*mon_host\s*=" /etc/pve/ceph.conf | head -n 1 | cut -d"=" -f2 | cut -d" " -f2-)
+    if [ -n "$MON_LINE" ]; then
+        MONITORS=$(echo "$MON_LINE")
+        info "Found monitors: $MONITORS"
+    else
+        info "No 'mon_host' line found in /etc/pve/ceph.conf."
+    fi
+else
+    info "/etc/pve/ceph.conf not found."
+fi
+
+# If monitors could not be programmatically retrieved, prompt the user.
+if [ -z "$MONITORS" ]; then
+    info "Unable to programmatically retrieve Ceph monitors."
+    read -p "Please enter a comma-separated list of Ceph monitor addresses: " MONITORS
+fi
+
+##########################
+# Step 2: Retrieve Ceph Client Name and Secret
+##########################
+KEYRING="/etc/pve/priv/ceph.client.admin.keyring"
+CEPH_NAME=""
+CEPH_SECRET=""
+if [ -f "$KEYRING" ]; then
+    info "==> Attempting to retrieve Ceph client credentials from $KEYRING..."
+    CEPH_SECRET=$(grep -i 'key' "${KEYRING}" | head -n1 | awk '{print $3}' | tr -d ' \n')
+    if [ -n "$CEPH_SECRET" ]; then
+        CEPH_NAME="admin"
+        info "Retrieved Ceph client: admin"
+    else
+        info "Unable to extract secret from $KEYRING."
+    fi
+else
+    info "$KEYRING not found."
+fi
+
+# If secret is still empty, prompt the user.
+if [ -z "$CEPH_SECRET" ]; then
+    CEPH_NAME=$(prompt_default "Enter Ceph client name" "admin")
+    read -s -p "Enter Ceph secret for client '$CEPH_NAME': " CEPH_SECRET
+    echo ""
+fi
