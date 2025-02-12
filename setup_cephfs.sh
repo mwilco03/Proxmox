@@ -129,8 +129,7 @@ fi
 # Step 3: Prompt for Mount Points
 ##########################
 HOST_MOUNT=$(prompt_default "Enter host CephFS mount point" "/mnt/cephfs")
-# Change container mount point default from "/cephshared" to "/cephs"
-CONTAINER_MOUNT=$(prompt_default "Enter mount point inside containers" "/cephs")
+CONTAINER_MOUNT=$(prompt_default "Enter mount point inside containers" "/mnt/cephfs")
 
 ##########################
 # Step 4: Check/Install ceph-common
