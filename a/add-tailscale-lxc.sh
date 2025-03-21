@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
+#!/usr/bin/env bash 
 # Copyright (c) 2021-2025 tteck
-# Oritinal Author: tteck (tteckster) 
-# Modified by: Quix 
+# Original Author: tteck (tteckster)
+# Modified by: Quix & ChatGPT
 # License: MIT
 # https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE
 
@@ -13,7 +13,7 @@ function header_info {
   / / / __ `/ / / ___/ ___/ __ `/ / _ \
  / / / /_/ / / (__  ) /__/ /_/ / /  __/
  /_/  \__,_/_/_/____/\___/\__,_/_/\___/
- 
+
 EOF
 }
 header_info
@@ -68,14 +68,49 @@ if command -v apt-get >/dev/null 2>&1; then
   echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/$ID $VER main" >/etc/apt/sources.list.d/tailscale.list
   apt-get update &>/dev/null
   apt-get install -y tailscale &>/dev/null
+  # Enable and start tailscaled via systemd
+  systemctl enable tailscaled
+  systemctl start tailscaled
 elif command -v dnf >/dev/null 2>&1; then
   # Fedora/CentOS installation
   curl -fsSL https://pkgs.tailscale.com/stable/fedora/tailscale.repo | tee /etc/yum.repos.d/tailscale.repo
   dnf install -y tailscale &>/dev/null
+  # Enable and start tailscaled via systemd
+  systemctl enable tailscaled
+  systemctl start tailscaled
 elif command -v apk >/dev/null 2>&1; then
   # Alpine installation
   apk update &>/dev/null
   apk add tailscale &>/dev/null
+
+  # Check if the tailscaled init script exists; if not, create it.
+  if [ ! -f /etc/init.d/tailscaled ]; then
+    cat <<'EOS' > /etc/init.d/tailscaled
+#!/sbin/openrc-run
+
+name="tailscaled"
+description="Tailscale daemon"
+
+# Dynamically determine the path to tailscaled at runtime.
+command="$(which tailscaled)"
+command_args="--state=/var/lib/tailscale/tailscaled.state"
+pidfile="/run/${RC_SVCNAME}.pid"
+
+depend() {
+    need net
+    before firewall
+}
+
+start_pre() {
+    checkpath --directory --mode 0755 /var/lib/tailscale
+}
+EOS
+    chmod +x /etc/init.d/tailscaled
+  fi
+
+  # Enable tailscaled service to start at boot and start it immediately.
+  rc-update add tailscaled default
+  rc-service tailscaled start
 else
   echo "Unsupported package manager. Aborting."
   exit 1
