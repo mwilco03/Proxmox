@@ -19,7 +19,7 @@ EOF
 header_info
 set -e
 while true; do
-  read -p "This will add Tailscale to an existing LXC Container ONLY. Proceed(y/n)?" yn
+  read -p "This will add Tailscale to an existing LXC Container ONLY. Proceed (y/n)? " yn
   case $yn in
     [Yy]*) break ;;
     [Nn]*) exit ;;
@@ -68,49 +68,41 @@ if command -v apt-get >/dev/null 2>&1; then
   echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/$ID $VER main" >/etc/apt/sources.list.d/tailscale.list
   apt-get update &>/dev/null
   apt-get install -y tailscale &>/dev/null
-  # Enable and start tailscaled via systemd
-  systemctl enable tailscaled
-  systemctl start tailscaled
+  # Check for either tailscaled or tailscale systemd service.
+  if systemctl status tailscaled.service &>/dev/null; then
+      systemctl enable tailscaled
+      systemctl start tailscaled
+  elif systemctl status tailscale.service &>/dev/null; then
+      systemctl enable tailscale
+      systemctl start tailscale
+  fi
 elif command -v dnf >/dev/null 2>&1; then
   # Fedora/CentOS installation
   curl -fsSL https://pkgs.tailscale.com/stable/fedora/tailscale.repo | tee /etc/yum.repos.d/tailscale.repo
   dnf install -y tailscale &>/dev/null
-  # Enable and start tailscaled via systemd
-  systemctl enable tailscaled
-  systemctl start tailscaled
+  # Check for either tailscaled or tailscale systemd service.
+  if systemctl status tailscaled.service &>/dev/null; then
+      systemctl enable tailscaled
+      systemctl start tailscaled
+  elif systemctl status tailscale.service &>/dev/null; then
+      systemctl enable tailscale
+      systemctl start tailscale
+  fi
 elif command -v apk >/dev/null 2>&1; then
   # Alpine installation
   apk update &>/dev/null
   apk add tailscale &>/dev/null
-
-  # Check if the tailscaled init script exists; if not, create it.
-  if [ ! -f /etc/init.d/tailscaled ]; then
-    cat <<'EOS' > /etc/init.d/tailscaled
-#!/sbin/openrc-run
-
-name="tailscaled"
-description="Tailscale daemon"
-
-# Dynamically determine the path to tailscaled at runtime.
-command="$(which tailscaled)"
-command_args="--state=/var/lib/tailscale/tailscaled.state"
-pidfile="/run/${RC_SVCNAME}.pid"
-
-depend() {
-    need net
-    before firewall
-}
-
-start_pre() {
-    checkpath --directory --mode 0755 /var/lib/tailscale
-}
-EOS
-    chmod +x /etc/init.d/tailscaled
+  # Check for OpenRC init script for tailscaled or tailscale.
+  if [ -f /etc/init.d/tailscaled ]; then
+      rc-update add tailscaled default
+      rc-service tailscaled start
+  elif [ -f /etc/init.d/tailscale ]; then
+      rc-update add tailscale default
+      rc-service tailscale start
+  else
+      echo "Tailscale init script not found. Aborting."
+      exit 1
   fi
-
-  # Enable tailscaled service to start at boot and start it immediately.
-  rc-update add tailscaled default
-  rc-service tailscaled start
 else
   echo "Unsupported package manager. Aborting."
   exit 1
@@ -121,4 +113,4 @@ TAGS="${TAGS:+$TAGS; }tailscale"
 pct set "$CTID" -tags "${TAGS}"
 msg "\e[1;32m ✔ Installed Tailscale\e[0m"
 
-msg "\e[1;31m Reboot ${CTID} LXC to apply the changes, then run tailscale up in the LXC console\e[0m"
+msg "\e[1;31m Reboot ${CTID} LXC to apply the changes, then run 'tailscale up' in the LXC console\e[0m"
